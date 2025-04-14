@@ -80,7 +80,7 @@ pub struct ChatMessage {
 }
 
 /// Represents a parameter in a function tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParameterProperty {
     /// The type of the parameter (e.g. "string", "number", "array", etc)
     #[serde(rename = "type")]
@@ -96,7 +96,7 @@ pub struct ParameterProperty {
 }
 
 /// Represents the parameters schema for a function tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParametersSchema {
     /// The type of the parameters object (usually "object")
     #[serde(rename = "type")]
@@ -108,7 +108,7 @@ pub struct ParametersSchema {
 }
 
 /// Represents a function definition for a tool
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FunctionTool {
     /// The name of the function
     pub name: String,
@@ -119,7 +119,7 @@ pub struct FunctionTool {
 }
 
 /// Represents a tool that can be used in chat
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tool {
     /// The type of tool (e.g. "function")
     #[serde(rename = "type")]
