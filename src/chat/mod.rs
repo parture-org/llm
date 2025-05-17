@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{error::LLMError, ToolCall};
 
 /// Role of a participant in a chat conversation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChatRole {
     /// The user/human participant in the conversation
     User,
@@ -16,7 +16,7 @@ pub enum ChatRole {
 }
 
 /// The supported MIME type of an image.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ImageMime {
     /// JPEG image
@@ -41,7 +41,7 @@ impl ImageMime {
 }
 
 /// The type of a message in a chat conversation.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum MessageType {
     /// A text message
     #[default]
@@ -69,7 +69,7 @@ pub enum ReasoningEffort {
 }
 
 /// A single message in a chat conversation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     /// The role of who sent this message (user or assistant)
     pub role: ChatRole,
