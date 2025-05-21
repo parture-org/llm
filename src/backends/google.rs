@@ -525,11 +525,23 @@ impl From<crate::chat::ParametersSchema> for Schema {
     }
 }
 
+impl From<crate::chat::ParameterStringProperty> for Schema {
+    fn from(psp: crate::chat::ParameterStringProperty) -> Self {
+        Schema {
+            schema_type: Some(SchemaType::String),
+            description: psp.description,
+            enum_values: psp.const_value.map_or(psp.enum_list, |cv| Some(vec![cv])),
+            ..Default::default()
+        }
+    }
+}
+
 impl From<crate::chat::ParameterSchemaOrProperty> for Schema {
     fn from(psop: crate::chat::ParameterSchemaOrProperty) -> Self {
         match psop {
             ParameterSchemaOrProperty::Property(pp) => pp.into(),
             ParameterSchemaOrProperty::Schema(ps) => ps.into(),
+            ParameterSchemaOrProperty::StringProperty(psp) => psp.into(), // Added new variant handling
         }
     }
 }

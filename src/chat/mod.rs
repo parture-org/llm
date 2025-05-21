@@ -3,6 +3,7 @@ use std::fmt;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use from_variants::FromVariants;
 
 use crate::{error::LLMError, ToolCall};
 
@@ -80,11 +81,12 @@ pub struct ChatMessage {
 }
 
 /// Represents either a complex schema or a single property, used for type flexibility.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, FromVariants)]
 #[serde(untagged)] // Ensures serialization without an explicit enum tag
 pub enum ParameterSchemaOrProperty {
     Schema(ParametersSchema),
     Property(ParameterProperty),
+    StringProperty(ParameterStringProperty),
 }
 
 /// Represents a parameter in a function tool
@@ -366,4 +368,25 @@ impl ChatMessageBuilder {
             content: self.content,
         }
     }
+}
+
+/// Represents a parameter that is specifically a string, with an optional const value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ParameterStringProperty {
+    /// The type of the parameter, should be "string".
+    #[serde(rename = "type", default = "default_string_type")]
+    pub property_type: String, // Not an Option, will default to "string"
+    /// Description of what the parameter does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// When type is "enum", this defines the possible values for the parameter.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "enum")]
+    pub enum_list: Option<Vec<String>>,
+    /// Constrains the parameter to a specific constant string value.
+    #[serde(skip_serializing_if = "Option::is_none", rename = "const")]
+    pub const_value: Option<String>,
+}
+
+fn default_string_type() -> String {
+    "string".to_string()
 }
