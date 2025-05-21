@@ -94,6 +94,9 @@ pub struct ParameterProperty {
     /// When type is "enum", this defines the possible values for the parameter
     #[serde(skip_serializing_if = "Option::is_none", rename = "enum")]
     pub enum_list: Option<Vec<String>>,
+    /// subproperties when function tool call parameter is 'object'
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<std::collections::BTreeMap<String, Box<ParameterProperty>>>,
 }
 
 /// Represents the parameters schema for a function tool

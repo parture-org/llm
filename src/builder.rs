@@ -676,6 +676,7 @@ pub struct ParamBuilder {
     description: String,
     items: Option<Box<ParameterProperty>>,
     enum_list: Option<Vec<String>>,
+    object_properties: Option<std::collections::BTreeMap<String, Box<ParameterProperty>>>,
 }
 
 impl ParamBuilder {
@@ -687,6 +688,7 @@ impl ParamBuilder {
             description: String::new(),
             items: None,
             enum_list: None,
+            object_properties: None,
         }
     }
 
@@ -714,6 +716,15 @@ impl ParamBuilder {
         self
     }
 
+    /// Sets the sub-properties for object parameters
+    pub fn properties(
+        mut self,
+        props: std::collections::BTreeMap<String, Box<ParameterProperty>>,
+    ) -> Self {
+        self.object_properties = Some(props);
+        self
+    }
+
     /// Builds the parameter property
     fn build(self) -> (String, ParameterProperty) {
         (
@@ -723,6 +734,7 @@ impl ParamBuilder {
                 description: self.description,
                 items: self.items,
                 enum_list: self.enum_list,
+                properties: self.object_properties,
             },
         )
     }
