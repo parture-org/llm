@@ -201,7 +201,7 @@ impl From<&crate::chat::Tool> for OllamaTool {
                 parameters: OllamaParameters {
                     schema_type: "object".to_string(),
                     properties: properties_value,
-                    required: tool.function.parameters.required.clone(),
+                    required: tool.function.parameters.required.clone().unwrap_or_default(),
                 },
             },
         }

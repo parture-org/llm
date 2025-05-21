@@ -58,6 +58,10 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
+
+// Import the necessary types from the chat module
+use crate::chat::{ParameterSchemaOrProperty};
 
 /// Client for interacting with Google's Gemini API.
 ///
@@ -274,6 +278,44 @@ enum GoogleResponseMimeType {
     Enum,
 }
 
+// Definition for Google's specific Schema Type, used in tool parameters
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SchemaType {
+    String,
+    Number,
+    Integer,
+    Boolean,
+    Array,
+    Object,
+}
+
+// Definition for Google's specific Schema, used in tool parameters
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Schema {
+    #[serde(rename = "type")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_type: Option<SchemaType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nullable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<Arc<Schema>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "enum")]
+    pub enum_values: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<std::collections::HashMap<String, Arc<Schema>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub one_of: Option<Vec<Arc<Schema>>>
+}
+
 /// Google's function calling tool definition
 #[derive(Serialize, Debug)]
 struct GoogleTool {
@@ -288,38 +330,32 @@ struct GoogleFunctionDeclaration {
     /// Name of the function
     name: String,
     /// Description of what the function does
-    description: String,
+    description: Option<String>,
     /// Parameters for the function
-    parameters: GoogleFunctionParameters,
+    parameters: Option<Schema>,
 }
 
 impl From<&crate::chat::Tool> for GoogleFunctionDeclaration {
     fn from(tool: &crate::chat::Tool) -> Self {
-        let properties_value = serde_json::to_value(&tool.function.parameters.properties)
-            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
-
         GoogleFunctionDeclaration {
             name: tool.function.name.clone(),
-            description: tool.function.description.clone(),
-            parameters: GoogleFunctionParameters {
-                schema_type: "object".to_string(),
-                properties: properties_value,
-                required: tool.function.parameters.required.clone(),
-            },
+            description: Some(tool.function.description.clone()),
+            parameters: Some(Schema {
+                schema_type: Some(SchemaType::Object),
+                properties: Some(
+                    tool.function
+                        .parameters
+                        .properties
+                        .clone()
+                        .into_iter()
+                        .map(|(k, v)| (k, Arc::new(v.into())))
+                        .collect()
+                ),
+                required: Some(tool.function.parameters.required.clone().unwrap_or_default()),
+                ..Default::default()
+            }),
         }
     }
-}
-
-/// Google function parameters schema
-#[derive(Serialize, Debug)]
-struct GoogleFunctionParameters {
-    /// The type of parameters object (usually "object")
-    #[serde(rename = "type")]
-    schema_type: String,
-    /// Map of parameter names to their properties
-    properties: Value,
-    /// List of required parameter names
-    required: Vec<String>,
 }
 
 /// Google function call object in response
@@ -440,6 +476,60 @@ impl Google {
             json_schema,
             tools,
             client: builder.build().expect("Failed to build reqwest Client"),
+        }
+    }
+}
+
+impl From<crate::chat::ParameterProperty> for Schema {
+    fn from(pp: crate::chat::ParameterProperty) -> Self {
+        let schema_type = pp.property_type.as_ref().map(|t| match t.as_str() {
+            "string" => SchemaType::String,
+            "number" => SchemaType::Number,
+            "integer" => SchemaType::Integer,
+            "boolean" => SchemaType::Boolean,
+            "array" => SchemaType::Array,
+            "object" => SchemaType::Object,
+            _ => SchemaType::String, // Default or decide error handling
+        });
+
+        Schema {
+            schema_type,
+            description: pp.description,
+            items: pp.items.map(|item_box| Arc::new((*item_box).into())),
+            enum_values: pp.enum_list,
+            one_of: pp.one_of.map(|of_vec| {
+                of_vec.into_iter().map(|psop| Arc::new(psop.into())).collect()
+            }),
+            // format, nullable, properties, required are not directly in ParameterProperty
+            // and would be set if pp implies an object, or from a wrapping ParametersSchema
+            ..Default::default()
+        }
+    }
+}
+
+impl From<crate::chat::ParametersSchema> for Schema {
+    fn from(ps: crate::chat::ParametersSchema) -> Self {
+        Schema {
+            schema_type: Some(SchemaType::Object),
+            properties: Some(
+                ps.properties
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v.into())))
+                    .collect(),
+            ),
+            required: ps.required,
+            // description, items, enum_values, one_of might not be typical for a direct ParametersSchema -> Schema mapping
+            // unless ps itself has a description field, etc.
+            ..Default::default()
+        }
+    }
+}
+
+impl From<crate::chat::ParameterSchemaOrProperty> for Schema {
+    fn from(psop: crate::chat::ParameterSchemaOrProperty) -> Self {
+        match psop {
+            ParameterSchemaOrProperty::Property(pp) => pp.into(),
+            ParameterSchemaOrProperty::Schema(ps) => ps.into(),
         }
     }
 }

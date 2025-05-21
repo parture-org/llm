@@ -5,8 +5,8 @@
 
 use crate::{
     chat::{
-        FunctionTool, ParameterProperty, ParametersSchema, ReasoningEffort, StructuredOutputFormat,
-        Tool, ToolChoice,
+        FunctionTool, ParameterProperty, ParameterSchemaOrProperty, ParametersSchema,
+        ReasoningEffort, StructuredOutputFormat, Tool, ToolChoice,
     },
     error::LLMError,
     LLMProvider,
@@ -677,6 +677,7 @@ pub struct ParamBuilder {
     items: Option<Box<ParameterProperty>>,
     enum_list: Option<Vec<String>>,
     object_properties: Option<std::collections::BTreeMap<String, Box<ParameterProperty>>>,
+    one_of: Option<Vec<ParameterSchemaOrProperty>>,
 }
 
 impl ParamBuilder {
@@ -689,6 +690,7 @@ impl ParamBuilder {
             items: None,
             enum_list: None,
             object_properties: None,
+            one_of: None,
         }
     }
 
@@ -725,16 +727,24 @@ impl ParamBuilder {
         self
     }
 
+    /// Sets the oneOf schemas for the parameter
+    pub fn one_of(mut self, one_of_schemas: Vec<ParameterSchemaOrProperty>) -> Self {
+        self.one_of = Some(one_of_schemas);
+        self
+    }
+
     /// Builds the parameter property
     fn build(self) -> (String, ParameterProperty) {
         (
             self.name,
             ParameterProperty {
-                property_type: self.property_type,
-                description: self.description,
-                items: self.items,
+                property_type: Some(self.property_type),
+                description: Some(self.description),
+                items: self.items.map(|item_prop_box| {
+                    Box::new(ParameterSchemaOrProperty::Property(*item_prop_box))
+                }),
                 enum_list: self.enum_list,
-                properties: self.object_properties,
+                one_of: self.one_of,
             },
         )
     }
@@ -782,7 +792,7 @@ impl FunctionBuilder {
         let mut properties = HashMap::new();
         for param in self.parameters {
             let (name, prop) = param.build();
-            properties.insert(name, prop);
+            properties.insert(name, ParameterSchemaOrProperty::Property(prop));
         }
 
         Tool {
@@ -793,7 +803,7 @@ impl FunctionBuilder {
                 parameters: ParametersSchema {
                     schema_type: "object".to_string(),
                     properties,
-                    required: self.required,
+                    required: Some(self.required),
                 },
             },
         }

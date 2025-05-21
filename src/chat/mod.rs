@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 
 use async_trait::async_trait;
@@ -80,23 +79,33 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Represents either a complex schema or a single property, used for type flexibility.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)] // Ensures serialization without an explicit enum tag
+pub enum ParameterSchemaOrProperty {
+    Schema(ParametersSchema),
+    Property(ParameterProperty),
+}
+
 /// Represents a parameter in a function tool
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParameterProperty {
-    /// The type of the parameter (e.g. "string", "number", "array", etc)
+    /// The type of the parameter (e.g. "string", "number", "array", "object" etc)
     #[serde(rename = "type")]
-    pub property_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub property_type: Option<String>, // Made optional as type might be inferred from oneOf or be an object if items is present
     /// Description of what the parameter does
-    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>, // Made optional for flexibility
     /// When type is "array", this defines the type of the array items
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub items: Option<Box<ParameterProperty>>,
+    pub items: Option<Box<ParameterSchemaOrProperty>>, // Changed type
     /// When type is "enum", this defines the possible values for the parameter
     #[serde(skip_serializing_if = "Option::is_none", rename = "enum")]
     pub enum_list: Option<Vec<String>>,
-    /// subproperties when function tool call parameter is 'object'
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub properties: Option<std::collections::BTreeMap<String, Box<ParameterProperty>>>,
+    /// Specifies that the parameter must be one of the schemas/properties in the list
+    #[serde(skip_serializing_if = "Option::is_none", rename = "oneOf")]
+    pub one_of: Option<Vec<ParameterSchemaOrProperty>>,
 }
 
 /// Represents the parameters schema for a function tool
@@ -105,10 +114,11 @@ pub struct ParametersSchema {
     /// The type of the parameters object (usually "object")
     #[serde(rename = "type")]
     pub schema_type: String,
-    /// Map of parameter names to their properties
-    pub properties: HashMap<String, ParameterProperty>,
+    /// Map of parameter names to their properties or nested schemas
+    pub properties: std::collections::HashMap<String, ParameterSchemaOrProperty>, // Changed type
     /// List of required parameter names
-    pub required: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<Vec<String>>, // Made Option for consistency and flexibility
 }
 
 /// Represents a function definition for a tool
