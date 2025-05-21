@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use from_variants::FromVariants;
+use std::collections::HashMap;
 
 use crate::{error::LLMError, ToolCall};
 
@@ -113,14 +114,18 @@ pub struct ParameterProperty {
 /// Represents the parameters schema for a function tool
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ParametersSchema {
-    /// The type of the parameters object (usually "object")
     #[serde(rename = "type")]
-    pub schema_type: String,
-    /// Map of parameter names to their properties or nested schemas
-    pub properties: std::collections::HashMap<String, ParameterSchemaOrProperty>, // Changed type
-    /// List of required parameter names
+    pub schema_type: String, // "object" or "array"
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub required: Option<Vec<String>>, // Made Option for consistency and flexibility
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub properties: Option<HashMap<String, ParameterSchemaOrProperty>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items: Option<Box<ParameterSchemaOrProperty>>, // For type: "array"
+    #[serde(rename = "oneOf", skip_serializing_if = "Option::is_none")]
+    pub one_of: Option<Vec<ParameterSchemaOrProperty>>,
 }
 
 /// Represents a function definition for a tool

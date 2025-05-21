@@ -59,6 +59,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 // Import the necessary types from the chat module
 use crate::chat::{ParameterSchemaOrProperty};
@@ -337,22 +338,23 @@ struct GoogleFunctionDeclaration {
 
 impl From<&crate::chat::Tool> for GoogleFunctionDeclaration {
     fn from(tool: &crate::chat::Tool) -> Self {
-        GoogleFunctionDeclaration {
+        Self {
             name: tool.function.name.clone(),
             description: Some(tool.function.description.clone()),
             parameters: Some(Schema {
                 schema_type: Some(SchemaType::Object),
-                properties: Some(
-                    tool.function
-                        .parameters
-                        .properties
-                        .clone()
-                        .into_iter()
-                        .map(|(k, v)| (k, Arc::new(v.into())))
-                        .collect()
-                ),
-                required: Some(tool.function.parameters.required.clone().unwrap_or_default()),
-                ..Default::default()
+                format: None,
+                description: tool.function.parameters.description.clone(),
+                nullable: None,
+                items: None,
+                enum_values: None,
+                properties: tool.function.parameters.properties.as_ref().map(|props_map| {
+                    props_map.iter()
+                        .map(|(k, v)| (k.clone(), Arc::new(v.clone().into())))
+                        .collect::<std::collections::HashMap<String, Arc<Schema>>>()
+                }),
+                required: tool.function.parameters.required.clone(),
+                one_of: None,
             }),
         }
     }
@@ -481,46 +483,63 @@ impl Google {
 }
 
 impl From<crate::chat::ParameterProperty> for Schema {
-    fn from(pp: crate::chat::ParameterProperty) -> Self {
-        let schema_type = pp.property_type.as_ref().map(|t| match t.as_str() {
-            "string" => SchemaType::String,
-            "number" => SchemaType::Number,
-            "integer" => SchemaType::Integer,
-            "boolean" => SchemaType::Boolean,
-            "array" => SchemaType::Array,
-            "object" => SchemaType::Object,
-            _ => SchemaType::String, // Default or decide error handling
+    fn from(source: crate::chat::ParameterProperty) -> Self {
+        // A single ParameterProperty does not directly contain sub-properties.
+        // If it's an object, it would be described by a nested ParametersSchema usually.
+        let properties: Option<std::collections::HashMap<String, Arc<Schema>>> = None;
+
+        let items = source.items.map(|item_box| Arc::new(Schema::from(*item_box)));
+        let oneof_schema = source.one_of.map(|one_of_vec| {
+            one_of_vec
+                .into_iter()
+                .map(|item| Arc::new(Schema::from(item)))
+                .collect()
         });
 
         Schema {
-            schema_type,
-            description: pp.description,
-            items: pp.items.map(|item_box| Arc::new((*item_box).into())),
-            enum_values: pp.enum_list,
-            one_of: pp.one_of.map(|of_vec| {
-                of_vec.into_iter().map(|psop| Arc::new(psop.into())).collect()
-            }),
-            // format, nullable, properties, required are not directly in ParameterProperty
-            // and would be set if pp implies an object, or from a wrapping ParametersSchema
-            ..Default::default()
+            schema_type: source.property_type.as_ref().map(|pt| schema_type_from_string(pt)),
+            format: None,
+            description: source.description,
+            nullable: None,
+            items,
+            enum_values: source.enum_list,
+            properties,
+            required: None,
+            one_of: oneof_schema,
         }
     }
 }
 
 impl From<crate::chat::ParametersSchema> for Schema {
-    fn from(ps: crate::chat::ParametersSchema) -> Self {
-        Schema {
-            schema_type: Some(SchemaType::Object),
-            properties: Some(
-                ps.properties
+    fn from(source: crate::chat::ParametersSchema) -> Self {
+        let properties: Option<HashMap<String, Arc<Schema>>> = source
+            .properties
+            .map(|props| {
+                props
                     .into_iter()
                     .map(|(k, v)| (k, Arc::new(v.into())))
-                    .collect(),
-            ),
-            required: ps.required,
-            // description, items, enum_values, one_of might not be typical for a direct ParametersSchema -> Schema mapping
-            // unless ps itself has a description field, etc.
-            ..Default::default()
+                    .collect()
+            });
+
+        let items = source.items.map(|item| Arc::new(Schema::from(*item)));
+
+        let oneof_schema = source.one_of.map(|one_of_vec| {
+            one_of_vec
+                .into_iter()
+                .map(|item| Arc::new(Schema::from(item)))
+                .collect()
+        });
+
+        Schema {
+            schema_type: Some(schema_type_from_string(&source.schema_type)),
+            format: None,
+            description: source.description,
+            nullable: None,
+            items,
+            enum_values: None,
+            properties,
+            required: source.required,
+            one_of: oneof_schema,
         }
     }
 }
@@ -529,9 +548,14 @@ impl From<crate::chat::ParameterStringProperty> for Schema {
     fn from(psp: crate::chat::ParameterStringProperty) -> Self {
         Schema {
             schema_type: Some(SchemaType::String),
+            format: None,
             description: psp.description,
             enum_values: psp.const_value.map_or(psp.enum_list, |cv| Some(vec![cv])),
-            ..Default::default()
+            nullable: None,
+            items: None,
+            properties: None,
+            required: None,
+            one_of: None,
         }
     }
 }
@@ -543,6 +567,18 @@ impl From<crate::chat::ParameterSchemaOrProperty> for Schema {
             ParameterSchemaOrProperty::Schema(ps) => ps.into(),
             ParameterSchemaOrProperty::StringProperty(psp) => psp.into(), // Added new variant handling
         }
+    }
+}
+
+// Helper function to convert string to SchemaType
+fn schema_type_from_string(s: &str) -> SchemaType {
+    match s {
+        "object" => SchemaType::Object,
+        "array" => SchemaType::Array,
+        "number" => SchemaType::Number,
+        "integer" => SchemaType::Integer,
+        "boolean" => SchemaType::Boolean,
+        _ => SchemaType::String, // Default to String if unknown, or handle error as appropriate
     }
 }
 

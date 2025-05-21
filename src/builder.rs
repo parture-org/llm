@@ -734,19 +734,16 @@ impl ParamBuilder {
     }
 
     /// Builds the parameter property
-    fn build(self) -> (String, ParameterProperty) {
-        (
-            self.name,
-            ParameterProperty {
-                property_type: Some(self.property_type),
-                description: Some(self.description),
-                items: self.items.map(|item_prop_box| {
-                    Box::new(ParameterSchemaOrProperty::Property(*item_prop_box))
-                }),
-                enum_list: self.enum_list,
-                one_of: self.one_of,
-            },
-        )
+    pub fn build(self) -> ParameterProperty {
+        ParameterProperty {
+            property_type: Some(self.property_type),
+            description: Some(self.description),
+            items: self.items.map(|param_prop_box| {
+                Box::new(ParameterSchemaOrProperty::Property(*param_prop_box))
+            }),
+            enum_list: self.enum_list,
+            one_of: self.one_of,
+        }
     }
 }
 
@@ -776,7 +773,7 @@ impl FunctionBuilder {
     }
 
     /// Adds a parameter to the function
-    pub fn param(mut self, param: ParamBuilder) -> Self {
+    pub fn add_param(mut self, param: ParamBuilder) -> Self {
         self.parameters.push(param);
         self
     }
@@ -789,23 +786,36 @@ impl FunctionBuilder {
 
     /// Builds the function tool
     fn build(self) -> Tool {
-        let mut properties = HashMap::new();
-        for param in self.parameters {
-            let (name, prop) = param.build();
-            properties.insert(name, ParameterSchemaOrProperty::Property(prop));
-        }
+        let properties: HashMap<String, ParameterSchemaOrProperty> = self
+            .parameters
+            .into_iter()
+            .map(|param_builder| {
+                let name = param_builder.name.clone();
+                let prop = param_builder.build();
+                (name, prop.into())
+            })
+            .collect();
+
+        let function_tool = FunctionTool {
+            name: self.name,
+            description: self.description,
+            parameters: ParametersSchema {
+                schema_type: "object".to_string(),
+                description: None,
+                properties: Some(properties),
+                required: if self.required.is_empty() {
+                    None
+                } else {
+                    Some(self.required)
+                },
+                items: None,
+                one_of: None,
+            },
+        };
 
         Tool {
             tool_type: "function".to_string(),
-            function: FunctionTool {
-                name: self.name,
-                description: self.description,
-                parameters: ParametersSchema {
-                    schema_type: "object".to_string(),
-                    properties,
-                    required: Some(self.required),
-                },
-            },
+            function: function_tool,
         }
     }
 }
