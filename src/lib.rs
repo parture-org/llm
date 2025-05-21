@@ -46,6 +46,12 @@ pub mod validated_llm;
 /// Evaluator for LLM providers
 pub mod evaluator;
 
+/// Speech-to-text support
+pub mod stt;
+
+/// Text-to-speech support
+pub mod tts;
+
 /// Secret store for storing API keys and other sensitive information
 pub mod secret_store;
 
@@ -55,7 +61,7 @@ pub mod api;
 /// Core trait that all LLM providers must implement, combining chat, completion
 /// and embedding capabilities into a unified interface
 pub trait LLMProvider:
-    chat::ChatProvider + completion::CompletionProvider + embedding::EmbeddingProvider
+    chat::ChatProvider + completion::CompletionProvider + embedding::EmbeddingProvider + stt::SpeechToTextProvider + tts::TextToSpeechProvider
 {
     fn tools(&self) -> Option<&[Tool]> {
         None

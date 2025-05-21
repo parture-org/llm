@@ -2,8 +2,8 @@
 
 > **Note**: This crate name previously belonged to another project. The current implementation represents a new and different library. The previous crate is now archived and will not receive any updates. **ref: https://github.com/rustformers/llm**
 
-**LLM** is a **Rust** library that lets you use **multiple LLM backends** in a single project: [OpenAI](https://openai.com), [Anthropic (Claude)](https://www.anthropic.com), [Ollama](https://github.com/ollama/ollama), [DeepSeek](https://www.deepseek.com), [xAI](https://x.ai), [Phind](https://www.phind.com), [Groq](https://www.groq.com) and [Google](https://cloud.google.com/gemini).
-With a **unified API** and **builder style** - similar to the Stripe experience - you can easily create **chat** or text **completion** requests without multiplying structures and crates.
+**LLM** is a **Rust** library that lets you use **multiple LLM backends** in a single project: [OpenAI](https://openai.com), [Anthropic (Claude)](https://www.anthropic.com), [Ollama](https://github.com/ollama/ollama), [DeepSeek](https://www.deepseek.com), [xAI](https://x.ai), [Phind](https://www.phind.com), [Groq](https://www.groq.com), [Google](https://cloud.google.com/gemini) and [ElevenLabs](https://elevenlabs.io).
+With a **unified API** and **builder style** - similar to the Stripe experience - you can easily create **chat**, text **completion**, speak-to-text requests without multiplying structures and crates.
 
 ## Key Features
 
@@ -21,6 +21,9 @@ With a **unified API** and **builder style** - similar to the Stripe experience 
 - **REST API**: Serve any LLM backend as a REST API with openai standard format.
 - **Vision**: Add vision to your requests to use images in your LLMs.
 - **Reasoning**: Add reasoning to your requests to use reasoning in your LLMs.
+- **Structured Output**: Request structured output from certain LLM providers based on a provided JSON schema.
+- **Speech to text**: Transcribe audio to text
+- **Text to speech**: Transcribe text to audio
 
 ## Use any LLM backend on your project
 
@@ -28,7 +31,7 @@ Simply add **LLM** to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-llm = { version = "1.0.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq"] }
+llm = { version = "1.2.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "Elevenlabs"] }
 ```
 
 ## Use any LLM on cli
@@ -49,7 +52,7 @@ LLM includes a command-line tool for easily interacting with different LLM model
 
 ```shell
 [dependencies]
-llm = { version = "1.0.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api"] }
+llm = { version = "1.2.4", features = ["openai", "anthropic", "ollama", "deepseek", "xai", "phind", "google", "groq", "api", "elevenlabs"] }
 ```
 
 More details in the [`api_example`](examples/api_example.rs)
@@ -83,6 +86,13 @@ More details in the [`api_example`](examples/api_example.rs)
 | [`openai_vision_example`](examples/openai_vision_example.rs) | Basic openai vision example with OpenAI |
 | [`openai_reasoning_example`](examples/openai_reasoning_example.rs) | Basic openai reasoning example with OpenAI |
 | [`anthropic_thinking_example`](examples/anthropic_thinking_example.rs) | Anthropic reasoning example |
+| [`elevenlabs_stt_example`](examples/elevenlabs_stt_example.rs) | Speech-to-text transcription example using ElevenLabs |
+| [`elevenlabs_tts_example`](examples/elevenlabs_tts_example.rs) | Text-to-speech example using ElevenLabs |
+| [`openai_stt_example`](examples/openai_stt_example.rs) | Speech-to-text transcription example using OpenAI |
+| [`openai_tts_example`](examples/openai_tts_example.rs) | Text-to-speech example using OpenAI |
+| [`tts_rodio_example`](examples/tts_rodio_example.rs) | Text-to-speech with rodio example using OpenAI |
+| [`chain_audio_text_example`](examples/chain_audio_text_example.rs) | Example demonstrating a multi-step chain combining speech-to-text and text processing |
+
 
 ## Usage
-Here's a basic example using OpenAI for chat completion. See the examples directory for other backends (Anthropic, Ollama, DeepSeek, xAI, Google, Phind), embedding capabilities, and more advanced use cases.
+Here's a basic example using OpenAI for chat completion. See the examples directory for other backends (Anthropic, Ollama, DeepSeek, xAI, Google, Phind, Elevenlabs), embedding capabilities, and more advanced use cases.

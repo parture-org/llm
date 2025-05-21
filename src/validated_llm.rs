@@ -28,6 +28,8 @@ use async_trait::async_trait;
 use crate::chat::{ChatMessage, ChatProvider, ChatResponse, ChatRole, MessageType, Tool};
 use crate::completion::{CompletionProvider, CompletionRequest, CompletionResponse};
 use crate::embedding::EmbeddingProvider;
+use crate::stt::SpeechToTextProvider;
+use crate::tts::TextToSpeechProvider;
 use crate::error::LLMError;
 use crate::{builder::ValidatorFn, LLMProvider};
 
@@ -190,5 +192,21 @@ impl EmbeddingProvider for ValidatedLLM {
     async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>, LLMError> {
         // Pass through to inner provider since embeddings don't need validation
         self.inner.embed(input).await
+    }
+}
+
+#[async_trait]
+impl SpeechToTextProvider for ValidatedLLM {
+    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String, LLMError> {
+        Err(LLMError::ProviderError(
+            "Speech to text not supported".to_string(),
+        ))
+    }
+}
+
+#[async_trait]
+impl TextToSpeechProvider for ValidatedLLM {
+    async fn speech(&self, _text: &str) -> Result<Vec<u8>, LLMError> {
+        Err(LLMError::ProviderError("Text to speech not supported".to_string()))
     }
 }

@@ -11,6 +11,8 @@ use crate::{
     },
     completion::{CompletionProvider, CompletionRequest, CompletionResponse},
     embedding::EmbeddingProvider,
+    stt::SpeechToTextProvider,
+    tts::TextToSpeechProvider,
     error::LLMError,
     FunctionCall, ToolCall,
 };
@@ -156,7 +158,6 @@ impl std::fmt::Display for AnthropicCompleteResponse {
                         .input
                         .clone()
                         .unwrap_or(serde_json::Value::Null)
-                        .to_string()
                 )?,
                 Some(ref t) if t == "thinking" => {
                     write!(f, "{}", content.thinking.clone().unwrap_or_default())?
@@ -243,6 +244,7 @@ impl Anthropic {
     /// * `stream` - Whether to stream responses (defaults to false)
     /// *
     /// * `thinking_budget_tokens` - Budget tokens for thinking (optional)
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         api_key: impl Into<String>,
         model: Option<String>,
@@ -486,6 +488,18 @@ impl EmbeddingProvider for Anthropic {
         ))
     }
 }
+
+#[async_trait]
+impl SpeechToTextProvider for Anthropic {
+    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String, LLMError> {
+        Err(LLMError::ProviderError(
+            "Speech to text not supported".to_string(),
+        ))
+    }
+}
+
+#[async_trait]
+impl TextToSpeechProvider for Anthropic {}
 
 impl crate::LLMProvider for Anthropic {
     fn tools(&self) -> Option<&[Tool]> {

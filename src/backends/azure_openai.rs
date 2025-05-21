@@ -1,10 +1,8 @@
-//! OpenAI API client implementation for chat and completion functionality.
+//! Azure OpenAI API client implementation for chat and completion functionality.
 //!
-//! This module provides integration with OpenAI's GPT models through their API.
+//! This module provides integration with Azure OpenAI's GPT models through their API.
 
-use std::time::Duration;
-
-#[cfg(feature = "openai")]
+#[cfg(feature = "azure_openai")]
 use crate::{
     chat::Tool,
     chat::{ChatMessage, ChatProvider, ChatRole, MessageType, StructuredOutputFormat},
@@ -24,11 +22,12 @@ use either::*;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
-/// Client for interacting with OpenAI's API.
+/// Client for interacting with Azure OpenAI's API.
 ///
-/// Provides methods for chat and completion requests using OpenAI's models.
-pub struct OpenAI {
+/// Provides methods for chat and completion requests using Azure OpenAI's models.
+pub struct AzureOpenAI {
     pub api_key: String,
+    pub api_version: String,
     pub base_url: Url,
     pub model: String,
     pub max_tokens: Option<u32>,
@@ -46,42 +45,99 @@ pub struct OpenAI {
     pub reasoning_effort: Option<String>,
     /// JSON schema for structured output
     pub json_schema: Option<StructuredOutputFormat>,
-    pub voice: Option<String>,
     client: Client,
 }
 
 /// Individual message in an OpenAI chat conversation.
 #[derive(Serialize, Debug)]
-struct OpenAIChatMessage<'a> {
+struct AzureOpenAIChatMessage<'a> {
     #[allow(dead_code)]
     role: &'a str,
     #[serde(
         skip_serializing_if = "Option::is_none",
         with = "either::serde_untagged_optional"
     )]
-    content: Option<Either<Vec<MessageContent<'a>>, String>>,
+    content: Option<Either<Vec<AzureMessageContent<'a>>, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<OpenAIFunctionCall<'a>>>,
+    tool_calls: Option<Vec<AzureOpenAIToolCall<'a>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
 }
 
+impl<'a> From<&'a ChatMessage> for AzureOpenAIChatMessage<'a> {
+    fn from(chat_msg: &'a ChatMessage) -> Self {
+        Self {
+            role: match chat_msg.role {
+                ChatRole::User => "user",
+                ChatRole::Assistant => "assistant",
+            },
+            tool_call_id: None,
+            content: match &chat_msg.message_type {
+                MessageType::Text => Some(Right(chat_msg.content.clone())),
+                // Image case is handled separately above
+                MessageType::Image(_) => unreachable!(),
+                MessageType::Pdf(_) => unimplemented!(),
+                MessageType::ImageURL(url) => {
+                    // Clone the URL to create an owned version
+
+                    Some(Left(vec![AzureMessageContent {
+                        message_type: Some("image_url"),
+                        text: None,
+                        image_url: Some(ImageUrlContent { url }),
+                        tool_output: None,
+                        tool_call_id: None,
+                    }]))
+                }
+                MessageType::ToolUse(_) => None,
+                MessageType::ToolResult(_) => None,
+            },
+            tool_calls: match &chat_msg.message_type {
+                MessageType::ToolUse(calls) => {
+                    let owned_calls: Vec<AzureOpenAIToolCall> =
+                        calls.iter().map(|c| c.into()).collect();
+                    Some(owned_calls)
+                }
+                _ => None,
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
-struct OpenAIFunctionPayload<'a> {
+struct AzureOpenAIFunctionCall<'a> {
     name: &'a str,
     arguments: &'a str,
 }
 
-#[derive(Serialize, Debug)]
-struct OpenAIFunctionCall<'a> {
-    id: &'a str,
-    #[serde(rename = "type")]
-    content_type: &'a str,
-    function: OpenAIFunctionPayload<'a>,
+impl<'a> From<&'a FunctionCall> for AzureOpenAIFunctionCall<'a> {
+    fn from(value: &'a FunctionCall) -> Self {
+        Self {
+            name: &value.name,
+            arguments: &value.arguments,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
-struct MessageContent<'a> {
+struct AzureOpenAIToolCall<'a> {
+    id: &'a str,
+    #[serde(rename = "type")]
+    content_type: &'a str,
+    function: AzureOpenAIFunctionCall<'a>,
+}
+
+impl<'a> From<&'a ToolCall> for AzureOpenAIToolCall<'a> {
+    fn from(value: &'a ToolCall) -> Self {
+        Self {
+            id: &value.id,
+            content_type: "function",
+            function: AzureOpenAIFunctionCall::from(&value.function),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct AzureMessageContent<'a> {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     message_type: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,11 +166,11 @@ struct OpenAIEmbeddingRequest {
     dimensions: Option<u32>,
 }
 
-/// Request payload for OpenAI's chat API endpoint.
+/// Request payload for Azure OpenAI's chat API endpoint.
 #[derive(Serialize, Debug)]
-struct OpenAIChatRequest<'a> {
+struct AzureOpenAIChatRequest<'a> {
     model: &'a str,
-    messages: Vec<OpenAIChatMessage<'a>>,
+    messages: Vec<AzureOpenAIChatMessage<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -134,41 +190,21 @@ struct OpenAIChatRequest<'a> {
     response_format: Option<OpenAIResponseFormat>,
 }
 
-impl std::fmt::Display for ToolCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{{\n  \"id\": \"{}\",\n  \"type\": \"{}\",\n  \"function\": {}\n}}",
-            self.id, self.call_type, self.function
-        )
-    }
-}
-
-impl std::fmt::Display for FunctionCall {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{{\n  \"name\": \"{}\",\n  \"arguments\": {}\n}}",
-            self.name, self.arguments
-        )
-    }
-}
-
 /// Response from OpenAI's chat API endpoint.
 #[derive(Deserialize, Debug)]
-struct OpenAIChatResponse {
-    choices: Vec<OpenAIChatChoice>,
+struct AzureOpenAIChatResponse {
+    choices: Vec<AzureOpenAIChatChoice>,
 }
 
 /// Individual choice within an OpenAI chat API response.
 #[derive(Deserialize, Debug)]
-struct OpenAIChatChoice {
-    message: OpenAIChatMsg,
+struct AzureOpenAIChatChoice {
+    message: AzureOpenAIChatMsg,
 }
 
 /// Message content within an OpenAI chat API response.
 #[derive(Deserialize, Debug)]
-struct OpenAIChatMsg {
+struct AzureOpenAIChatMsg {
     #[allow(dead_code)]
     role: String,
     content: Option<String>,
@@ -176,12 +212,12 @@ struct OpenAIChatMsg {
 }
 
 #[derive(Deserialize, Debug)]
-struct OpenAIEmbeddingData {
+struct AzureOpenAIEmbeddingData {
     embedding: Vec<f32>,
 }
 #[derive(Deserialize, Debug)]
 struct OpenAIEmbeddingResponse {
-    data: Vec<OpenAIEmbeddingData>,
+    data: Vec<AzureOpenAIEmbeddingData>,
 }
 
 /// An object specifying the format that the model must output.
@@ -239,7 +275,7 @@ impl From<StructuredOutputFormat> for OpenAIResponseFormat {
     }
 }
 
-impl ChatResponse for OpenAIChatResponse {
+impl ChatResponse for AzureOpenAIChatResponse {
     fn text(&self) -> Option<String> {
         self.choices.first().and_then(|c| c.message.content.clone())
     }
@@ -251,7 +287,7 @@ impl ChatResponse for OpenAIChatResponse {
     }
 }
 
-impl std::fmt::Display for OpenAIChatResponse {
+impl std::fmt::Display for AzureOpenAIChatResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match (
             &self.choices.first().unwrap().message.content,
@@ -275,7 +311,7 @@ impl std::fmt::Display for OpenAIChatResponse {
     }
 }
 
-impl OpenAI {
+impl AzureOpenAI {
     /// Creates a new OpenAI client with the specified configuration.
     ///
     /// # Arguments
@@ -298,7 +334,9 @@ impl OpenAI {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         api_key: impl Into<String>,
-        base_url: Option<String>,
+        api_version: impl Into<String>,
+        deployment_id: impl Into<String>,
+        endpoint: impl Into<String>,
         model: Option<String>,
         max_tokens: Option<u32>,
         temperature: Option<f32>,
@@ -313,18 +351,20 @@ impl OpenAI {
         tool_choice: Option<ToolChoice>,
         reasoning_effort: Option<String>,
         json_schema: Option<StructuredOutputFormat>,
-        voice: Option<String>,
     ) -> Self {
         let mut builder = Client::builder();
         if let Some(sec) = timeout_seconds {
             builder = builder.timeout(std::time::Duration::from_secs(sec));
         }
+
+        let endpoint = endpoint.into();
+        let deployment_id = deployment_id.into();
+
         Self {
             api_key: api_key.into(),
-            base_url: Url::parse(
-                &base_url.unwrap_or_else(|| "https://api.openai.com/v1/".to_owned()),
-            )
-            .expect("Failed to prase base Url"),
+            api_version: api_version.into(),
+            base_url: Url::parse(&format!("{endpoint}/openai/deployments/{deployment_id}/"))
+                .expect("Failed to parse base Url"),
             model: model.unwrap_or("gpt-3.5-turbo".to_string()),
             max_tokens,
             temperature,
@@ -340,13 +380,12 @@ impl OpenAI {
             client: builder.build().expect("Failed to build reqwest Client"),
             reasoning_effort,
             json_schema,
-            voice,
         }
     }
 }
 
 #[async_trait]
-impl ChatProvider for OpenAI {
+impl ChatProvider for AzureOpenAI {
     /// Sends a chat request to OpenAI's API.
     ///
     /// # Arguments
@@ -362,20 +401,19 @@ impl ChatProvider for OpenAI {
         tools: Option<&[Tool]>,
     ) -> Result<Box<dyn ChatResponse>, LLMError> {
         if self.api_key.is_empty() {
-            return Err(LLMError::AuthError("Missing OpenAI API key".to_string()));
+            return Err(LLMError::AuthError(
+                "Missing Azure OpenAI API key".to_string(),
+            ));
         }
 
-        // Clone the messages to have an owned mutable vector.
-        let messages = messages.to_vec();
-
-        let mut openai_msgs: Vec<OpenAIChatMessage> = vec![];
+        let mut openai_msgs: Vec<AzureOpenAIChatMessage> = vec![];
 
         for msg in messages {
             if let MessageType::ToolResult(ref results) = msg.message_type {
                 for result in results {
                     openai_msgs.push(
                         // Clone strings to own them
-                        OpenAIChatMessage {
+                        AzureOpenAIChatMessage {
                             role: "tool",
                             tool_call_id: Some(result.id.clone()),
                             tool_calls: None,
@@ -384,16 +422,16 @@ impl ChatProvider for OpenAI {
                     );
                 }
             } else {
-                openai_msgs.push(chat_message_to_api_message(msg))
+                openai_msgs.push(msg.into())
             }
         }
 
         if let Some(system) = &self.system {
             openai_msgs.insert(
                 0,
-                OpenAIChatMessage {
+                AzureOpenAIChatMessage {
                     role: "system",
-                    content: Some(Left(vec![MessageContent {
+                    content: Some(Left(vec![AzureMessageContent {
                         message_type: Some("text"),
                         text: Some(system),
                         image_url: None,
@@ -410,7 +448,7 @@ impl ChatProvider for OpenAI {
         let response_format: Option<OpenAIResponseFormat> =
             self.json_schema.clone().map(|s| s.into());
 
-        let body = OpenAIChatRequest {
+        let body = AzureOpenAIChatRequest {
             model: &self.model,
             messages: openai_msgs,
             max_tokens: self.max_tokens,
@@ -424,12 +462,19 @@ impl ChatProvider for OpenAI {
             response_format,
         };
 
-        let url = self
+        let mut url = self
             .base_url
             .join("chat/completions")
             .map_err(|e| LLMError::HttpError(e.to_string()))?;
 
-        let mut request = self.client.post(url).bearer_auth(&self.api_key).json(&body);
+        url.query_pairs_mut()
+            .append_pair("api-version", &self.api_version);
+
+        let mut request = self
+            .client
+            .post(url)
+            .header("api-key", &self.api_key)
+            .json(&body);
 
         if let Some(timeout) = self.timeout_seconds {
             request = request.timeout(std::time::Duration::from_secs(timeout));
@@ -450,13 +495,13 @@ impl ChatProvider for OpenAI {
 
         // Parse the successful response
         let resp_text = response.text().await?;
-        let json_resp: Result<OpenAIChatResponse, serde_json::Error> =
+        let json_resp: Result<AzureOpenAIChatResponse, serde_json::Error> =
             serde_json::from_str(&resp_text);
 
         match json_resp {
             Ok(response) => Ok(Box::new(response)),
             Err(e) => Err(LLMError::ResponseFormatError {
-                message: format!("Failed to decode OpenAI API response: {}", e),
+                message: format!("Failed to decode Azure OpenAI API response: {}", e),
                 raw_response: resp_text,
             }),
         }
@@ -467,71 +512,8 @@ impl ChatProvider for OpenAI {
     }
 }
 
-// Create an owned OpenAIChatMessage that doesn't borrow from any temporary variables
-fn chat_message_to_api_message(chat_msg: ChatMessage) -> OpenAIChatMessage<'static> {
-    // For other message types, create an owned OpenAIChatMessage
-    OpenAIChatMessage {
-        role: match chat_msg.role {
-            ChatRole::User => "user",
-            ChatRole::Assistant => "assistant",
-        },
-        tool_call_id: None,
-        content: match &chat_msg.message_type {
-            MessageType::Text => Some(Right(chat_msg.content.clone())),
-            // Image case is handled separately above
-            MessageType::Image(_) => unreachable!(),
-            MessageType::Pdf(_) => unimplemented!(),
-            MessageType::ImageURL(url) => {
-                // Clone the URL to create an owned version
-                let owned_url = url.clone();
-                // Leak the string to get a 'static reference
-                let url_str = Box::leak(owned_url.into_boxed_str());
-                Some(Left(vec![MessageContent {
-                    message_type: Some("image_url"),
-                    text: None,
-                    image_url: Some(ImageUrlContent { url: url_str }),
-                    tool_output: None,
-                    tool_call_id: None,
-                }]))
-            }
-            MessageType::ToolUse(_) => None,
-            MessageType::ToolResult(_) => None,
-        },
-        tool_calls: match &chat_msg.message_type {
-            MessageType::ToolUse(calls) => {
-                let owned_calls: Vec<OpenAIFunctionCall<'static>> = calls
-                    .iter()
-                    .map(|c| {
-                        let owned_id = c.id.clone();
-                        let owned_name = c.function.name.clone();
-                        let owned_args = c.function.arguments.clone();
-
-                        // Need to leak these strings to create 'static references
-                        // This is a deliberate choice to solve the lifetime issue
-                        // The small memory leak is acceptable in this context
-                        let id_str = Box::leak(owned_id.into_boxed_str());
-                        let name_str = Box::leak(owned_name.into_boxed_str());
-                        let args_str = Box::leak(owned_args.into_boxed_str());
-
-                        OpenAIFunctionCall {
-                            id: id_str,
-                            content_type: "function",
-                            function: OpenAIFunctionPayload {
-                                name: name_str,
-                                arguments: args_str,
-                            },
-                        }
-                    })
-                    .collect();
-                Some(owned_calls)
-            }
-            _ => None,
-        },
-    }
-}
-
 #[async_trait]
-impl CompletionProvider for OpenAI {
+impl CompletionProvider for AzureOpenAI {
     /// Sends a completion request to OpenAI's API.
     ///
     /// Currently not implemented.
@@ -542,92 +524,9 @@ impl CompletionProvider for OpenAI {
     }
 }
 
+#[cfg(feature = "azure_openai")]
 #[async_trait]
-impl SpeechToTextProvider for OpenAI {
-
-    /// Transcribes audio data to text using OpenAI API
-    ///
-    /// # Arguments
-    ///
-    /// * `audio` - Raw audio data as bytes
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(String)` - Transcribed text
-    /// * `Err(LLMError)` - Error if transcription fails
-    async fn transcribe(&self, audio: Vec<u8>) -> Result<String, LLMError> {
-        let url = self
-            .base_url
-            .join("audio/transcriptions")
-            .map_err(|e| LLMError::HttpError(e.to_string()))?;
-
-        let part = reqwest::multipart::Part::bytes(audio).file_name("audio.m4a");
-        let form = reqwest::multipart::Form::new()
-            .text("model", self.model.clone())
-            .text("response_format", "text")
-            .part("file", part);
-        
-
-        let mut req = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .multipart(form);
-
-        if let Some(t) = self.timeout_seconds {
-            req = req.timeout(Duration::from_secs(t));
-        }
-
-        let resp = req.send().await?;
-        let text = resp.text().await?;
-        let raw = text.clone();
-        Ok(raw)
-    }
-
-    /// Transcribes audio file to text using OpenAI API
-    ///
-    /// # Arguments
-    ///
-    /// * `file_path` - Path to the audio file
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(String)` - Transcribed text
-    /// * `Err(LLMError)` - Error if transcription fails
-    async fn transcribe_file(&self, file_path: &str) -> Result<String, LLMError> {
-        let url = self
-            .base_url
-            .join("audio/transcriptions")
-            .map_err(|e| LLMError::HttpError(e.to_string()))?;
-
-        let form = reqwest::multipart::Form::new()
-            .text("model", self.model.clone())
-            .text("response_format", "text")
-            .file("file", file_path)
-            .await
-            .map_err(|e| LLMError::HttpError(e.to_string()))?;
-        
-
-        let mut req = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .multipart(form);
-
-        if let Some(t) = self.timeout_seconds {
-            req = req.timeout(Duration::from_secs(t));
-        }
-
-        let resp = req.send().await?;
-        let text = resp.text().await?;
-        let raw = text.clone();
-        Ok(raw)
-    }
-}
-
-#[cfg(feature = "openai")]
-#[async_trait]
-impl EmbeddingProvider for OpenAI {
+impl EmbeddingProvider for AzureOpenAI {
     async fn embed(&self, input: Vec<String>) -> Result<Vec<Vec<f32>>, LLMError> {
         if self.api_key.is_empty() {
             return Err(LLMError::AuthError("Missing OpenAI API key".into()));
@@ -645,15 +544,18 @@ impl EmbeddingProvider for OpenAI {
             dimensions: self.embedding_dimensions,
         };
 
-        let url = self
+        let mut url = self
             .base_url
             .join("embeddings")
             .map_err(|e| LLMError::HttpError(e.to_string()))?;
 
+        url.query_pairs_mut()
+            .append_pair("api-version", &self.api_version);
+
         let resp = self
             .client
             .post(url)
-            .bearer_auth(&self.api_key)
+            .header("api-key", &self.api_key)
             .json(&body)
             .send()
             .await?
@@ -666,65 +568,24 @@ impl EmbeddingProvider for OpenAI {
     }
 }
 
-impl LLMProvider for OpenAI {
+impl LLMProvider for AzureOpenAI {
     fn tools(&self) -> Option<&[Tool]> {
         self.tools.as_deref()
     }
 }
 
 #[async_trait]
-impl TextToSpeechProvider for OpenAI {
-    /// Converts text to speech using OpenAI's TTS API
-    /// 
-    /// # Arguments
-    /// * `text` - The text to convert to speech
-    /// 
-    /// # Returns
-    /// * `Result<Vec<u8>, LLMError>` - Audio data as bytes or error
-    async fn speech(&self, text: &str) -> Result<Vec<u8>, LLMError> {
-        if self.api_key.is_empty() {
-            return Err(LLMError::AuthError("Missing OpenAI API key".into()));
-        }
+impl SpeechToTextProvider for AzureOpenAI {
+    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String, LLMError> {
+        Err(LLMError::ProviderError(
+            "Azure OpenAI does not implement speech to text endpoint yet.".into(),
+        ))
+    }
+}
 
-        let url = self
-            .base_url
-            .join("audio/speech")
-            .map_err(|e| LLMError::HttpError(e.to_string()))?;
-
-        #[derive(Serialize)]
-        struct SpeechRequest {
-            model: String,
-            input: String,
-            voice: String,
-        }
-
-        let body = SpeechRequest {
-            model: self.model.clone(),
-            input: text.to_string(),
-            voice: self.voice.clone().unwrap_or("alloy".to_string()),
-        };
-
-        let mut req = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .json(&body);
-
-        if let Some(t) = self.timeout_seconds {
-            req = req.timeout(Duration::from_secs(t));
-        }
-
-        let resp = req.send().await?;
-        
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let error_text = resp.text().await?;
-            return Err(LLMError::ResponseFormatError {
-                message: format!("OpenAI API returned error status: {}", status),
-                raw_response: error_text,
-            });
-        }
-
-        Ok(resp.bytes().await?.to_vec())
+#[async_trait]
+impl TextToSpeechProvider for AzureOpenAI {
+    async fn speech(&self, _text: &str) -> Result<Vec<u8>, LLMError> {
+        Err(LLMError::ProviderError("Text to speech not supported".to_string()))
     }
 }

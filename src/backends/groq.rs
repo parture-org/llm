@@ -6,6 +6,8 @@ use crate::{
     chat::{ChatMessage, ChatProvider, ChatResponse, ChatRole, Tool},
     completion::{CompletionProvider, CompletionRequest, CompletionResponse},
     embedding::EmbeddingProvider,
+    stt::SpeechToTextProvider,
+    tts::TextToSpeechProvider,
     error::LLMError,
     LLMProvider, ToolCall,
 };
@@ -199,5 +201,17 @@ impl EmbeddingProvider for Groq {
         ))
     }
 }
+
+#[async_trait]
+impl SpeechToTextProvider for Groq {
+    async fn transcribe(&self, _audio: Vec<u8>) -> Result<String, LLMError> {
+        Err(LLMError::ProviderError(
+            "Groq does not implement speech to text endpoint yet.".into(),
+        ))
+    }
+}
+
+#[async_trait]
+impl TextToSpeechProvider for Groq {}
 
 impl LLMProvider for Groq {}
